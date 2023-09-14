@@ -16,11 +16,18 @@ func error_check(error_message error){
 
 func error_exit(message string){
 	fmt.Println(message)
-	os.Exit(1)
+	os.Exit(0)
 }
 
 func display_help(){
-	fmt.Println("Help information to be displayed here")
+	fmt.Println("FTPmap\n\n" +
+				"--help Display application help\n" +
+				"-h  Display application help\n" +
+				"-t  Specify target host\n" +
+				"-s  Specity desitination port, defaults to 21 if port unset.\n" +
+				"-u  Specify username (if set password must also be set), defaults to anonymous if unset.\n" + 
+				"-p  Specify password\n\n")
+	os.Exit(0)
 }
 
 func argument_parse() map[string]string {
@@ -78,17 +85,23 @@ func argument_parse() map[string]string {
 }
 
 func authentication_test(remote_connection net.Conn, arguments map[string]string) bool{
+
+	//default to anonymous login is no credentials are set
+	if arguments["username"] == "unset"{
+		arguments["username"] = "anonymous"
+		arguments["password"] = ""
+	}
+
 	for i := 0; i < 3; i++{
-    
+
 		fmt.Fprintf(remote_connection, "USER " + arguments["username"] + "\n")
 		fmt.Fprintf(remote_connection, "PASS " + arguments["password"] + "\n")
 		fmt.Fprintf(remote_connection, "EXIT\n")
-		
-		response_message, _ := bufio.NewReader(remote_connection).ReadString('\n')
+		message, _ := bufio.NewReader(remote_connection).ReadString('\n')
 
-		if response_message[:3] == "530"{
+		if message[:3] == "530"{
 			return false
-		}else if response_message[:3] == "230"{
+		}else if message[:3] == "230"{
 			return true
 		}
 	}
