@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"bufio"
 	"net"
+	"regexp"
 )
 
 func error_check(error_message error){
@@ -44,6 +46,7 @@ func argument_parse() map[string]string {
 	var port string = "unset"
 	var username string = "unset"
 	var password string = "unset"
+	var option string = "unset"
 
 	for argumentIndex, arg := range arguments{
 		switch arg{
@@ -59,6 +62,8 @@ func argument_parse() map[string]string {
 			username = arguments[argumentIndex + 1]
 		case "-p":
 			password = arguments[argumentIndex + 1]
+		case "--bruteforce":
+			option = arguments[argumentIndex]
 		}
 	}
 
@@ -80,18 +85,48 @@ func argument_parse() map[string]string {
 	parsed_arguments_map["port"] = port
 	parsed_arguments_map["username"] = username
 	parsed_arguments_map["password"] = password
+	parsed_arguments_map["option"] = option
 
 	return parsed_arguments_map
 }
 
-func authentication_test(remote_connection net.Conn, arguments map[string]string) bool{
+func client(option string, remote_connection net.Conn, arguments map[string]string) string{
 
+	//raw command isnt ideal but user will be doing this to their own system... Can always add some regex sanitization...
+	ping_output, ping_error := exec.Command("ping","-c 1",arguments["target"]).Output()
+	if ping_error != nil{
+		error_exit("Unable to reach detination server.")
+	}
+
+	//regex to capture ping ttl, we can use this to determine the OS type (sort of)
+	pattern := regexp.MustCompile("ttl=(.*?) ")
+	ttl_regex := pattern.FindStringSubmatch(string(ping_output))
+
+	var operating_system_ttl string = "Unknown TTL"
+
+	if len(ttl_regex) > 0{
+		operating_system_ttl = ttl_regex[len(ttl_regex) - 1]
+
+		if len(operating_system_ttl) == 3{
+			if string(operating_system_ttl[0]) == "1"{
+				operating_system_ttl = operating_system_ttl + " (Windows)"
+			}else if string(operating_system_ttl[0]) == "2"{
+				operating_system_ttl = operating_system_ttl + " (Solaris)"
+			}
+		}else if string(operating_system_ttl[0]) == "6" {
+			operating_system_ttl = operating_system_ttl + " (Linux)"
+		}else{
+			operating_system_ttl = operating_system_ttl + " (Unknown)"
+		}
+	}
+	
 	//default to anonymous login is no credentials are set
 	if arguments["username"] == "unset"{
 		arguments["username"] = "anonymous"
 		arguments["password"] = ""
 	}
 
+	//attempt login 3 times, packets can get lost afterall
 	for i := 0; i < 3; i++{
 
 		fmt.Fprintf(remote_connection, "USER " + arguments["username"] + "\n")
@@ -99,13 +134,17 @@ func authentication_test(remote_connection net.Conn, arguments map[string]string
 		fmt.Fprintf(remote_connection, "EXIT\n")
 		message, _ := bufio.NewReader(remote_connection).ReadString('\n')
 
-		if message[:3] == "530"{
-			return false
-		}else if message[:3] == "230"{
-			return true
+		if len(message) > 3{
+			if message[:3] == "220"{
+				fmt.Print("[-]    " + arguments["target"] + "    " + arguments["port"] + "   " + operating_system_ttl + "   " + message[4:])
+			}else if message[:3] == "530"{
+				return "[!]    " + arguments["target"] + "    " + arguments["port"] + "   " + arguments["username"] + ":" + arguments["password"]
+			}else if message[:3] == "230"{
+				return "[+]    " + arguments["target"] + "    " + arguments["port"] + "   " + arguments["username"] + ":" + arguments["password"]
+			}
 		}
 	}
-	return false
+	return "Unknown Status code, exiting...\n\n"
 }
 
 func main(){
@@ -118,9 +157,7 @@ func main(){
 
 	defer remote_connection.Close()
 
-	if authentication_test(remote_connection, arguments) == false{
-		error_exit("Unable to authenticate.")
-	}else{
-		//work to do...
-	}
+	var client_response = client(arguments["option"], remote_connection, arguments)
+
+	fmt.Println(client_response)
 }
